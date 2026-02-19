@@ -88,7 +88,7 @@ if archivo_cv and os.path.exists("perfil_puesto.pkl"):
     st.subheader("📊 Resultado de la Evaluación")
     st.metric("Nivel de coincidencia", f"{porcentaje} %")
 
-    if similitud >= 0.75:
+    if similitud >= 0.50:
         st.success("✅ POSTULANTE APTO PARA EL PUESTO")
     else:
         st.error("❌ POSTULANTE NO APTO PARA EL PUESTO")
