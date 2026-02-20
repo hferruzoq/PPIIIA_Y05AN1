@@ -1,102 +1,130 @@
 import streamlit as st
 import pandas as pd
-import pdfplumber
-import joblib
-from sentence_transformers import SentenceTransformer
+import pickle
 from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
 import os
 
-# ---------------- CONFIGURACIÓN ----------------
-st.set_page_config(
-    page_title="Evaluación Inteligente de CVs",
-    page_icon="📄",
-    layout="wide"
-)
+# ----------------------------------
+# CONFIGURACIÓN
+# ----------------------------------
+st.set_page_config(page_title="Evaluación IA de Postulantes", layout="centered")
+st.title("🤖 Evaluación Inteligente de Postulantes")
 
-st.title("📄 Sistema Inteligente de Evaluación de Postulantes")
+# ----------------------------------
+# CARGAR MODELO DE EMBEDDINGS
+# ----------------------------------
+@st.cache_resource
+def cargar_modelo():
+    return SentenceTransformer('all-MiniLM-L6-v2')
 
-modelo = SentenceTransformer("all-MiniLM-L6-v2")
+modelo_embeddings = cargar_modelo()
 
-# ---------------- FUNCIONES ----------------
-def extraer_texto_pdf(archivo_pdf):
-    texto = ""
-    with pdfplumber.open(archivo_pdf) as pdf:
-        for pagina in pdf.pages:
-            if pagina.extract_text():
-                texto += pagina.extract_text()
-    return texto
+# ----------------------------------
+# CARGAR PERFIL DEL PUESTO (PKL)
+# ----------------------------------
+with open("modelo/perfil_puesto.pkl", "rb") as f:
+    perfil_puesto_embedding = pickle.load(f)
 
-def generar_texto_puesto(df):
-    fila = df.iloc[0]
-    texto = f"""
-    Puesto: {fila['puesto']}.
-    Habilidades requeridas: {fila['habilidades']}.
-    Experiencia mínima: {fila['experiencia']} años.
-    Nivel académico: {fila['nivel']}.
-    Tecnologías clave: {fila['tecnologias']}.
-    """
-    return texto
+# ----------------------------------
+# FORMULARIO DEL POSTULANTE
+# ----------------------------------
+st.header("📄 Formulario del Postulante")
 
-# ---------------- SIDEBAR ----------------
-st.sidebar.header("📌 Perfil del Puesto")
-
-puesto = st.sidebar.text_input("Puesto")
-habilidades = st.sidebar.text_area("Habilidades requeridas (separadas por coma)")
-experiencia = st.sidebar.number_input("Experiencia mínima (años)", min_value=0, max_value=30)
-nivel = st.sidebar.selectbox("Nivel académico", ["técnico", "universitario", "posgrado"])
-tecnologias = st.sidebar.text_area("Tecnologías clave")
-
-if st.sidebar.button("💾 Guardar Perfil del Puesto"):
-    data = {
-        "puesto": [puesto],
-        "habilidades": [habilidades],
-        "experiencia": [experiencia],
-        "nivel": [nivel],
-        "tecnologias": [tecnologias]
-    }
-
-    df_puesto = pd.DataFrame(data)
-    df_puesto.to_csv("perfil_puesto.csv", index=False)
-
-    texto_puesto = generar_texto_puesto(df_puesto)
-    embedding_puesto = modelo.encode(texto_puesto)
-
-    joblib.dump(embedding_puesto, "perfil_puesto.pkl")
-
-    st.sidebar.success("Perfil guardado y procesado correctamente")
-
-# ---------------- CUERPO PRINCIPAL ----------------
-st.header("📎 Evaluación del CV del Postulante")
-
-archivo_cv = st.file_uploader("Sube el CV del postulante (PDF)", type=["pdf"])
-
-if archivo_cv and os.path.exists("perfil_puesto.pkl"):
-
-    with st.spinner("Analizando CV..."):
-        texto_cv = extraer_texto_pdf(archivo_cv)
-        embedding_cv = modelo.encode(texto_cv)
-
-        embedding_puesto = joblib.load("perfil_puesto.pkl")
-
-        similitud = cosine_similarity(
-            [embedding_puesto],
-            [embedding_cv]
-        )[0][0]
-
-        porcentaje = round(similitud * 100, 2)
-
-    st.subheader("📊 Resultado de la Evaluación")
-    st.metric("Nivel de coincidencia", f"{porcentaje} %")
-
-    if similitud >= 0.50:
-        st.success("✅ POSTULANTE APTO PARA EL PUESTO")
-    else:
-        st.error("❌ POSTULANTE NO APTO PARA EL PUESTO")
-
-    st.info(
-        "La evaluación se basa en la similitud semántica entre el perfil del puesto "
-        "y el contenido del CV utilizando modelos de lenguaje preentrenados."
+with st.form("form_postulante"):
+    nivel_academico = st.selectbox(
+        "Nivel académico",
+        ["Técnico", "Universitario", "Posgrado"]
     )
 
-elif archivo_cv:
-    st.warning("Primero debe registrar el perfil del puesto.")
+    carrera = st.text_input("Carrera profesional")
+
+    experiencia_anios = st.number_input(
+        "Años de experiencia en el puesto",
+        min_value=0,
+        max_value=40
+    )
+
+    descripcion_experiencia = st.text_area(
+        "Describe tu experiencia laboral"
+    )
+
+    tecnologias = st.text_area(
+        "Conocimientos tecnológicos",
+        placeholder="Ejemplo: Python, SQL, Power BI"
+    )
+
+    habilidades = st.text_area(
+        "Habilidades técnicas y blandas",
+        placeholder="Ejemplo: análisis, trabajo en equipo"
+    )
+
+    certificaciones = st.text_area(
+        "Certificaciones (opcional)"
+    )
+
+    enviar = st.form_submit_button("Evaluar Postulación")
+
+# ----------------------------------
+# PROCESAMIENTO
+# ----------------------------------
+if enviar:
+    # Convertir formulario a texto semántico
+    texto_postulante = f"""
+    Nivel académico: {nivel_academico}.
+    Carrera profesional: {carrera}.
+    Experiencia laboral: {experiencia_anios} años.
+    Descripción de experiencia: {descripcion_experiencia}.
+    Tecnologías dominadas: {tecnologias}.
+    Habilidades: {habilidades}.
+    Certificaciones: {certificaciones}.
+    """
+
+    # Generar embedding del postulante
+    embedding_postulante = modelo_embeddings.encode([texto_postulante])
+
+    # Calcular similitud
+    similitud = cosine_similarity(
+        embedding_postulante,
+        perfil_puesto_embedding
+    )[0][0]
+
+    porcentaje = round(similitud * 100, 2)
+
+    # Umbral de decisión
+    umbral = 0.70
+
+    st.subheader("📊 Resultado de la Evaluación")
+    st.write(f"**Similitud con el perfil del puesto:** {porcentaje}%")
+
+    if similitud >= umbral:
+        st.success("✅ Postulante APTO para el puesto")
+    else:
+        st.error("❌ Postulante NO APTO para el puesto")
+
+    # ----------------------------------
+    # GUARDAR DATOS EN CSV
+    # ----------------------------------
+    datos = {
+        "nivel_academico": nivel_academico,
+        "carrera": carrera,
+        "experiencia_anios": experiencia_anios,
+        "descripcion_experiencia": descripcion_experiencia,
+        "tecnologias": tecnologias,
+        "habilidades": habilidades,
+        "certificaciones": certificaciones,
+        "similitud": porcentaje
+    }
+
+    df = pd.DataFrame([datos])
+
+    os.makedirs("data", exist_ok=True)
+
+    archivo = "data/postulantes.csv"
+    if os.path.exists(archivo):
+        df.to_csv(archivo, mode="a", header=False, index=False)
+    else:
+        df.to_csv(archivo, index=False)
+
+    st.info("📁 Postulación registrada correctamente")
+
